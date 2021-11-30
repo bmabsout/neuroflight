@@ -32,7 +32,6 @@ PG_DECLARE(statusLedConfig_t, statusLedConfig);
 
 // Helpful macros
 #if defined(UNIT_TEST) || defined(USE_FAKE_LED)
-
 #define LED0_TOGGLE              NOOP
 #define LED0_OFF                 NOOP
 #define LED0_ON                  NOOP

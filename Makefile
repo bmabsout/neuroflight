@@ -29,7 +29,7 @@ DEBUG     ?=
 
 # Insert the debugging hardfault debugger
 # releases should not be built with this flag as it does not disable pwm output
-DEBUG_HARDFAULTS ?=
+DEBUG_HARDFAULTS ?= F7
 
 # Serial port/Device for flashing
 SERIAL_DEVICE   ?= $(firstword $(wildcard /dev/ttyUSB*) no-port-found)

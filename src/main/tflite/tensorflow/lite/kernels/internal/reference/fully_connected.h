@@ -19,6 +19,8 @@ limitations under the License.
 #include "tflite/tensorflow/lite/kernels/internal/cppmath.h"
 #include "tflite/tensorflow/lite/kernels/internal/quantization_util.h"
 #include "tflite/tensorflow/lite/kernels/internal/types.h"
+// #include "io/uart4Serial.h"
+// #include "io/serial.h"
 
 namespace tflite {
 namespace reference_ops {
@@ -29,6 +31,7 @@ inline void FullyConnected(
     const float* weights_data, const RuntimeShape& bias_shape,
     const float* bias_data, const RuntimeShape& output_shape,
     float* output_data) {
+  // serialPrint(uart4Serial, "fully connected");
   const float output_activation_min = params.float_activation_min;
   const float output_activation_max = params.float_activation_max;
   // TODO(b/62193649): This really should be:

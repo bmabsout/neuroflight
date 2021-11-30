@@ -32,6 +32,7 @@
 #include "stm32_it.h"
 #include "usb_lib.h"
 #include "vcp/usb_istr.h"
+#include "drivers/light_led.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -67,6 +68,8 @@ void MemManage_Handler(void)
 {
     /* Go to infinite loop when Memory Manage exception occurs */
     while (1) {
+        delay(200);
+        LED2_TOGGLE;
     }
 }
 

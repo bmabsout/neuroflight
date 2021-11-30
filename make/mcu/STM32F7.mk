@@ -3,6 +3,7 @@
 #
 
 ifeq ($(DEBUG_HARDFAULTS),F7)
+# echo "Enabling faults"
 CFLAGS               += -DDEBUG_HARDFAULTS
 endif
 

@@ -114,7 +114,7 @@ void HardFault_Handler(void)
 
     while (1) {
 #ifdef LED2
-        delay(50);
+        delay(500);
         LED2_TOGGLE;
 #endif
     }
