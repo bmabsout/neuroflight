@@ -23,13 +23,33 @@
 #include "drivers/light_led.h"
 #include "drivers/time.h"
 #include "drivers/transponder_ir.h"
-
+#include "io/uart4Serial.h"
 #include "fc/fc_init.h"
 
 #include "flight/mixer.h"
 
 #ifdef DEBUG_HARDFAULTS
 //from: https://mcuoneclipse.com/2012/11/24/debugging-hard-faults-on-arm-cortex-m/
+
+
+void delay_dumb(int ms)
+{
+    for(int i = 0; i < ms*200000; i++)
+        asm volatile("\tnop\n");
+}
+
+void led_fault_c(unsigned long *hardfault_args)
+{
+    while(true)
+    {
+        delay_dumb(100);
+        LED0_ON;
+        // serialWrite(uart4Serial, 'a');
+        delay_dumb(1000);
+        LED0_OFF;
+    }
+}
+
 /**
  * hard_fault_handler_c:
  * This is called from the HardFault_HandlerAsm with a pointer the Fault stack
@@ -113,9 +133,9 @@ void HardFault_Handler(void)
     LED0_OFF;
 
     while (1) {
-#ifdef LED2
+#ifdef LED0
         delay(500);
-        LED2_TOGGLE;
+        LED0_TOGGLE;
 #endif
     }
 }

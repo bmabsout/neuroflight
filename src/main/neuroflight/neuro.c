@@ -22,7 +22,6 @@
 #include "io/serial.h"
 #include "io/uart4Serial.h"
 #include "trajectory_buffer.h"
-// #include "common/printf.h"
 // #include "tflite/model_data.h"
 // #include "tflite/smooth_frozen2.h"
 // #include "tflite/model_test_data.h"
@@ -304,26 +303,18 @@ crc_t block_crc() {
 }
 
 
+bool test = false;
+
 void neuroController(timeUs_t currentTimeUs, const pidProfile_t *pidProfile){
+
+
     if(initFlag) {
         neuroInit(pidProfile);
-        initFlag = false;
         initUART4();
-        // uart4Serial = openSerialPort(SERIAL_PORT_UART4, FUNCTION_BLACKBOX, NULL, NULL, 921600, MODE_RXTX, 0);
+        bool *n = NULL;
+        test = *n;
+        initFlag = false;
     } else {
-        // (state)gyro.gyroADCf
-
-
-        // static int loop_count = 0;
-        // loop_count += 1;
-        // if(loop_count % 100 == 0) {
-        //     serialWrite(uart4Serial, 165);
-        //     for(unsigned int i=1; i<=100; i++) {
-        //         write_float(0.1*i);
-        //     }
-        //     serialWrite(uart4Serial, 167);
-        // }
-
         uint8_t bytesWaiting;
         while ((bytesWaiting = serialRxBytesWaiting(uart4Serial))) {
             uint8_t b = serialRead(uart4Serial);
