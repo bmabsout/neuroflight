@@ -71,7 +71,7 @@ def p_mean(l, p, slack=0.0, axis=1):
     return res
 
 @tf.function
-def p_to_min(l, p=0, q=0.2):
+def p_to_min(l, p=0, q=0):
     deformator = p_mean(1.0-l, q)
     return p_mean(l, p)*deformator + (1.0-deformator)*tf.reduce_min(l)
 
@@ -86,11 +86,17 @@ def p_to_min(l, p=0, q=0.2):
 def weaken(weaken_me, weaken_by):
     return (weaken_me + weaken_by)/(1.0 + weaken_by)
 
+@tf.custom_gradient
+def scale_gradient(x, scale):
+  grad = lambda dy: (dy * scale, None)
+  return x, grad
+
+
 def to_positive(r):
     return np.clip(1-r,0,1)
 
 def closeness_rw(true_error):
-    return p_mean(to_positive(np.tanh(np.abs(true_error)/200)),0)
+    return p_mean(70.0/(70.0+np.abs(true_error)),0)
 
 # def acc_rw(motor_acc):
 #     return with_importance(p_mean(to_positive(np.abs(motor_acc)),0),-0.7)
@@ -135,7 +141,7 @@ def convert_traj_to_flight_log(traj, save_location):
         print(last_ob)
         rw = rewards_fn(ob,ac).numpy()[0]
         ang_vel = unroll_rpy(ob.ang_vel)
-        target = ang_vel - unroll_rpy(ob.error)
+        target = unroll_rpy(ob.error) + ang_vel
         flight_log.add(unroll_obs(ob), 
                        rw, 
                        {"closeness": rw},

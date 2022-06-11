@@ -47,8 +47,8 @@ class HyperParams:
             replay_size=int(1e6),
             gamma=0.9,
             polyak=0.995,
-            pi_lr=3e-4,
-            q_lr=3e-4,
+            pi_lr=1e-5,
+            q_lr=1e-5,
             batch_size=300,
             train_every=50,
             train_steps=30,
@@ -152,16 +152,7 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
     # Main outputs from computation graph
     with tf.name_scope('main'):
         pi_network, q_network = actor_critic(obs_space, act_space, **hp.ac_kwargs)
-    
-    # Target networks
-    with tf.name_scope('target'):
-        # Note that the action placeholder going to actor_critic here is 
-        # irrelevant, because we only need q_targ(s, pi_targ(s)).
-        pi_targ_network, q_targ_network  = actor_critic(obs_space, act_space, **hp.ac_kwargs)
 
-    # make sure network and target network is using the same weights
-    pi_targ_network.set_weights(pi_network.get_weights())
-    q_targ_network.set_weights(q_targ_network.get_weights())
 
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=hp.replay_size)
@@ -169,28 +160,6 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
 
     # Separate train ops for pi, q
     pi_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.pi_lr)
-    q_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.q_lr)
-
-    # Polyak averaging for target variables
-    @tf.function
-    def target_update():
-        for v_main, v_targ in zip(pi_network.trainable_variables, pi_targ_network.trainable_variables):
-            v_targ.assign(hp.polyak*v_targ + (1-hp.polyak)*v_main)
-        for v_main, v_targ in zip(q_network.trainable_variables, q_targ_network.trainable_variables):
-            v_targ.assign(hp.polyak*v_targ + (1-hp.polyak)*v_main)
-
-    @tf.function
-    def q_update(obs1, obs2, acts, rews, dones):
-        with tf.GradientTape() as tape:
-            q = tf.squeeze(q_network(tf.concat([obs1, acts], axis=-1)), axis=1)
-            pi_targ = pi_targ_network(obs2)
-            q_pi_targ = tf.squeeze(q_targ_network(tf.concat([obs2, pi_targ], axis=-1)), axis=1)
-            backup = tf.stop_gradient(rews/max_q_val + (1 - d)*hp.gamma * q_pi_targ)
-            q_loss = tf.reduce_mean((q-backup)**2) #+ sum(q_network.losses)*0.1
-        grads = tape.gradient(q_loss, q_network.trainable_variables)
-        grads_and_vars = zip(grads, q_network.trainable_variables)
-        q_optimizer.apply_gradients(grads_and_vars)
-        return q_loss, q
 
     @tf.function
     def pi_update(obs1, obs2, anchor_obs1):
@@ -198,39 +167,44 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
             pi = pi_network(obs1)
             pi2 = pi_network(obs2)
             anchor_pi = pi_network(anchor_obs1)
-            q_c = tf.reduce_mean(tf.squeeze(q_network(tf.concat([anchor_obs1, anchor_pi], axis=-1)), axis=-1)**2.0)**0.5
+            q_c = tf.reduce_mean(q_network(tf.concat([anchor_obs1, anchor_pi], axis=-1))**0.5)**2.0
 
             noise = tf.random.normal(
                 [13], mean=0.0, stddev=np.array([
-                    0.01,0.01,0.01,
-                    0.01,0.01,0.01,
-                    0.01,0.01,0.01,
+                    1.0,1.0,1.0,
+                    1.0,1.0,1.0,
+                    0.1,0.1,0.1,
                     0.0,0.0,0.0,0.0]),
             )
             pi_bar = pi_network(obs1+noise)
+            var_sum = sum(map(lambda v: tf.reduce_mean(tf.abs(v)),pi_network.trainable_variables))
+            pi_weight_c = tf.stack([10.0/(10.0+var_sum)])**2.0
+            before_tanh_c = tf.stack([(20.0/(20.0+sum(pi_network.losses)))**4.0])
+            # objective for regularizing the output of the nn as well as the weights
+            # tf.print(pi_network.trainable_variables)
+            # tf.print(pi_network.losses)
 
-            reg = sum(pi_network.losses)*1e-3
-            # print("q_pi", q_pi)
-            pi_diffs = tf.abs((pi-pi2))/2.0
-            pi_bar_diffs = (tf.abs((pi-pi_bar))/2.0 + 1e-5)/(1.0+1e-5)
-            pi_diffs_c = obs_utils.p_mean(obs_utils.p_mean(1.0 - pi_diffs, 1.0), 1.0)
-            pi_bar_c = obs_utils.p_mean(obs_utils.p_mean(1.0 - pi_bar_diffs, 1.0), 1.0)
-            center_c = obs_utils.p_mean(obs_utils.p_mean(1.0 - tf.abs(pi+0.4)/1.5,1.0),1.0)
-            # tf.print("q_c",q_c)
-            reg_c = tf.squeeze(obs_utils.p_mean(tf.stack([pi_diffs_c**1.5, pi_bar_c**0.5, center_c**0.8],axis=1), 0.0))
-            tf.print("pi_bar_c", pi_bar_c)
-            tf.print("pi_diffs_c", pi_diffs_c)
-            tf.print("center_c", center_c)
-            # tf.print("r",reg_c)
-            # tf.print("q",q_c)
-            # # tf.print("")
-            all_c = obs_utils.p_to_min(tf.stack([q_c**0.5,reg_c**2.0]))
-            # combined_c = q_c - reg - reg_c*1e-3
-            # combined_c = q_c - center_c*3e-5 - action_c*1e-7 -reg*0.1
-            # tf.print("w", weaken(reg_c,4.0))
-            # tf.print("c", combined_c)
-            # print("ev", everything_c)
-            pi_loss = 1.0-all_c
+            temporal_c = obs_utils.p_mean(obs_utils.p_mean((0.2/(0.2+tf.abs(pi-pi2)))**2.0, 1.0), 1.0)
+            # objective for minimizing subsequent action differences
+
+            spatial_c = obs_utils.p_mean(obs_utils.p_mean(0.1/(0.1+tf.abs(pi-pi_bar)), 0.), 0.)
+            # objective representing similar inputs should map to similar outputs
+
+            center_c = obs_utils.p_mean(obs_utils.p_mean(1.0 - (tf.abs(pi+0.76)/1.761),0.),0.)
+            # objective for maintaining an output of -0.8
+
+            reg_c = tf.squeeze(obs_utils.p_mean(tf.stack([spatial_c, temporal_c, before_tanh_c],axis=1), 0.0))
+            # all_c = p_to_min(tf.stack([q_c, reg_c]), q=0.0)
+            all_c = obs_utils.p_mean(tf.stack([tf.stack([obs_utils.scale_gradient(q_c, 3e2)]), obs_utils.scale_gradient(before_tanh_c, 3.0), spatial_c, obs_utils.scale_gradient(temporal_c, 1.0)], axis=1), 0.0)
+            # all_c = q_c + 0.008*pi_diffs_c + 0.005*pi_bar_c + 0.025*center_c
+            # if debug:
+            tf.print("temporal_c", temporal_c)
+            tf.print("spatial_c", spatial_c)
+            tf.print("pi_weight_c", pi_weight_c)
+            tf.print("before_tanh_c", before_tanh_c)
+            tf.print("reg_c", reg_c)
+            tf.print("q_c", q_c)
+            pi_loss = 1.0 - all_c
         grads = tape.gradient(pi_loss, pi_network.trainable_variables)
         grads_and_vars = zip(grads, pi_network.trainable_variables)
         pi_optimizer.apply_gradients(grads_and_vars)
@@ -281,8 +255,6 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
                     AvoidExtremes=avoid_extremes,
                     Reg=reg
                 )
-                # target update
-                target_update()
 
         # End of epoch wrap-up
         if t > 0 and t % hp.steps_per_epoch == 0:

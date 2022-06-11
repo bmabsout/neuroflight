@@ -14,7 +14,6 @@ def unroll_act(act):
     ])
 
 def unroll_obs(obs):
-    print(unroll_rpy(obs.error))
     return np.concatenate([
         unroll_rpy(obs.error),
         unroll_rpy(obs.ang_vel),
@@ -22,21 +21,38 @@ def unroll_obs(obs):
         unroll_act(obs.prev_action)
     ])
 
+def plot_traj(traj):
+    fig = plt.figure(constrained_layout=True)
+    rpy_subfig = [["r"], ["p"], ["y"]]
+    act_subfig = [["a1"], ["a2"], ["a3"], ["a4"]]
+    ax = fig.subplot_mosaic([[rpy_subfig, act_subfig]])
+    unrolled = np.array(list(map(lambda obs_act: unroll_obs(obs_act[0]), traj))).T
+    try:
+        er = unrolled[0]
+        ep = unrolled[1]
+        ey = unrolled[2]
+        r = unrolled[3]
+        p = unrolled[4]
+        y = unrolled[5]
+        sr = er + r
+        sp = ep + p
+        sy = ey + y
+
+        ax["r"].plot(r)
+        ax["p"].plot(p)
+        ax["y"].plot(y)
+
+        ax["r"].plot(sr)
+        ax["p"].plot(sp)
+        ax["y"].plot(sy)
+
+        ax["a1"].plot(unrolled[-4])
+        ax["a2"].plot(unrolled[-3])
+        ax["a3"].plot(unrolled[-2])
+        ax["a4"].plot(unrolled[-1])
+        plt.show()
+    except:
+        print("err")
+
 traj = pickle.load( open( "traj.p", "rb" ) )
-
-fig = plt.figure(constrained_layout=True)
-ax = fig.subplot_mosaic([["er", "a1"], ["ep", "a2"], ["ey", "a3"], ["ey", "a4"]])
-unrolled = np.array(list(map(unroll_obs, traj))).T
-print(unrolled.shape)
-for obs in traj:
-    print(obs)
-ax["er"].plot(unrolled[0])
-ax["ep"].plot(unrolled[1])
-ax["ey"].plot(unrolled[2])
-
-ax["a1"].plot(unrolled[-4])
-ax["a2"].plot(unrolled[-3])
-ax["a3"].plot(unrolled[-2])
-ax["a4"].plot(unrolled[-1])
-
-plt.show()
+plot_traj(traj)

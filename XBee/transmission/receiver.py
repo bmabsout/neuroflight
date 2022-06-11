@@ -119,5 +119,5 @@ if __name__ == '__main__':
 
     #ser.read(4000)
     #send_and_recieve_byte(ser)
-    keep_receiving(ser)
+    keep_receiving(ser, keep_checking=True)
     ser.close()

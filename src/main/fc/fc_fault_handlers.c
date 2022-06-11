@@ -105,10 +105,10 @@ void secondary_fault_handler(crashStackContext_t *ctxt)
     huart_pin_config.Mode = GPIO_MODE_AF_PP;
     huart_pin_config.Pull = GPIO_NOPULL;
     huart_pin_config.Speed = GPIO_SPEED_FREQ_LOW;
-    huart_pin_config.Alternate = GPIO_AF7_UART3;
+    huart_pin_config.Alternate = GPIO_AF7_USART3;
     HAL_GPIO_Init(GPIOA, &huart_pin_config);
 
-    huart.Instance = UART3;
+    huart.Instance = USART3;
     huart.Init.BaudRate = 115200;
     huart.Init.WordLength = UART_WORDLENGTH_8B;
     huart.Init.StopBits = UART_STOPBITS_1;
