@@ -157,7 +157,7 @@ void evaluateGraphWithErrorStateDeltaStateAct(timeUs_t currentTimeUs){
 	for (int i = 0; i < GRAPH_OUTPUT_SIZE; i++) {
 		float new_output = graphOutput[i];
 		new_output = constrainf(new_output, -1.0f, 1.0f);
-		controlOutput[i] = 0*transformScale(new_output, -1.0f, 1.0f, 0.0f, 1.0f);
+		controlOutput[i] = transformScale(new_output, -1.0f, 1.0f, 0.0f, 1.0f);
 		previousOutput[i] = new_output;
 	}
 
