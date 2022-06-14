@@ -49,6 +49,7 @@ class HyperParams:
             polyak=0.995,
             pi_lr=1e-5,
             q_lr=1e-5,
+            aq_lr=1e-5,
             batch_size=200,
             train_every=50,
             train_steps=30,
@@ -61,6 +62,7 @@ class HyperParams:
         self.polyak = polyak
         self.pi_lr = pi_lr
         self.q_lr = q_lr
+        self.aq_lr = aq_lr
         self.batch_size = batch_size
         self.train_every = train_every
         self.train_steps = train_steps
@@ -175,7 +177,7 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
     pi_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.pi_lr)
     q_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.q_lr)
     if anchor_q:
-        anchor_q_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.q_lr)
+        anchor_q_optimizer = tf.keras.optimizers.Adam(learning_rate=hp.aq_lr)
 
     # Polyak averaging for target variables
     @tf.function
@@ -216,19 +218,17 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
 
 
     @tf.function
-    def pi_update(obs1, obs2, anchor_obs1, debug=False):
+    def pi_update(obs1, obs2, anchor_obs1, loss_q, debug=False):
         with tf.GradientTape() as tape:
             pi = pi_network(obs1)
             pi2 = pi_network(obs2)
-            q_pi = tf.reduce_mean(q_targ_network(tf.concat([obs1, pi], axis=-1))**0.5)**2.0
+            q_c = tf.stack([1.0])
+            # if loss_q < 1e-4:
+            q_c = tf.stack([tf.reduce_mean(q_targ_network(tf.concat([obs1, pi], axis=-1))**0.5)**2.0])
+            aq_c = tf.stack([1.0])
             if anchor_q:
-                anchor_pi = pi_network(anchor_obs1)
-                anchor_c=tf.reduce_mean(anchor_targ_network(tf.concat([anchor_obs1, anchor_pi], axis=-1))**0.5)**2.0
-                weakened_q_pi = obs_utils.weaken(q_pi,0.5)
-                q_c = tf.squeeze(obs_utils.p_mean(tf.stack([anchor_c, weakened_q_pi]), 0.0))
-                # q_c = q_pi
-            else:
-                q_c = q_pi
+                pi_anchor = pi_network(anchor_obs1)
+                aq_c=tf.stack([tf.reduce_mean(anchor_targ_network(tf.concat([anchor_obs1, pi_anchor], axis=-1))**0.5)])**2.0
 
             noise = tf.random.normal(
                 [13], mean=0.0, stddev=np.array([
@@ -238,8 +238,8 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
                     0.0,0.0,0.0,0.0]),
             )
             pi_bar = pi_network(obs1+noise)
-            var_sum = sum(map(lambda v: tf.reduce_mean(tf.abs(v)),pi_network.trainable_variables))
-            pi_weight_c = tf.stack([10.0/(10.0+var_sum)])**2.0
+            var_sum = sum(map(lambda v: tf.reduce_mean(tf.abs(v)**2.0),pi_network.trainable_variables))
+            pi_weight_c = tf.stack([50.0/(50.0+var_sum)])**2.0
             before_tanh_c = tf.stack([(20.0/(20.0+sum(pi_network.losses)))**4.0])
             # objective for regularizing the output of the nn as well as the weights
             # tf.print(pi_network.trainable_variables)
@@ -256,7 +256,7 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
 
             reg_c = tf.squeeze(obs_utils.p_mean(tf.stack([spatial_c, temporal_c, before_tanh_c],axis=1), 0.0))
             # all_c = p_to_min(tf.stack([q_c, reg_c]), q=0.0)
-            all_c = obs_utils.p_mean(tf.stack([tf.stack([obs_utils.scale_gradient(q_c, 3e2)]), obs_utils.scale_gradient(before_tanh_c, 3.0), spatial_c, obs_utils.scale_gradient(temporal_c, 1.0)], axis=1), 0.0)
+            all_c = obs_utils.p_mean(tf.stack([ obs_utils.scale_gradient(q_c, 3e2),obs_utils.scale_gradient(before_tanh_c, 3.0), spatial_c, temporal_c], axis=1), 0.0)
             # all_c = q_c + 0.008*pi_diffs_c + 0.005*pi_bar_c + 0.025*center_c
             if debug:
                 tf.print("temporal_c", temporal_c)
@@ -281,9 +281,6 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
         r = obs_utils.rewards_fn(o, a)
         d = False
         # Store experience to replay buffer
-        print(str(o))
-        print(str(a))
-        print(str(o2))
         replay_buffer.store(
             obs_utils.unroll_obs(o),
             obs_utils.unroll_act(a),
@@ -313,19 +310,25 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
                 dones = tf.constant(batch['done'])
                 # Q-learning update
                 loss_q, q_vals = q_update(obs1, obs2, acts, rews, dones)
+                aq_loss = 1.0
                 if anchor_q:
-                    anchor_q_update(anchor_obs1, anchor_obs2, anchor_acts, anchor_rews, anchor_dones)
+                    aq_loss, aq_val = anchor_q_update(anchor_obs1, anchor_obs2, anchor_acts, anchor_rews, anchor_dones)
+                logger.store(LossAQ=aq_loss)
                 logger.store(LossQ=loss_q)
 
                 # Policy update
-                pi_loss, avoid_extremes, qs, safe_qs, reg = pi_update(obs1, obs2, anchor_obs1, debug=ts%10==0)
+                all_c, q_c, reg_c, temporal_c, spatial_c, center_c, pi_weight_c = pi_update(obs1, obs2, anchor_obs1, loss_q, debug=(ts+1)%20==0)
+
                 logger.store(
-                    LossPi=pi_loss.numpy(),
-                    NormQ=qs,
-                    NormSafe=safe_qs,
-                    AvoidExtremes=avoid_extremes,
-                    Reg=reg
+                    All=all_c,
+                    Q=q_c,
+                    Reg=reg_c,
+                    Temporal=temporal_c,
+                    Spatial=spatial_c,
+                    Center=center_c,
+                    Pi_weight=pi_weight_c
                 )
+
                 # target update
                 target_update()
 
@@ -339,13 +342,15 @@ def live_ddpg(obs_queue, obs_space, act_space, hp: HyperParams=HyperParams(),act
 
             # Log info about epoch
             logger.log_tabular('Epoch', epoch)
-            # logger.log_tabular('TestEpLen', average_only=True)
             logger.log_tabular('TotalEnvInteracts', t)
-            logger.log_tabular('LossPi', average_only=True)
-            logger.log_tabular('LossQ', average_only=True)
-            logger.log_tabular('NormQ', average_only=True)
-            logger.log_tabular('NormSafe', average_only=True)
-            logger.log_tabular('AvoidExtremes', average_only=True)
-            logger.log_tabular('Time', time.time()-start_time)
+            logger.log_tabular('Temporal', average_only=True)
+            logger.log_tabular('Spatial', average_only=True)
+            logger.log_tabular('Center', average_only=True)
+            logger.log_tabular('Pi_weight', average_only=True)
             logger.log_tabular('Reg', average_only=True)
+            logger.log_tabular('Q', average_only=True)
+            logger.log_tabular('All', average_only=True)
+            logger.log_tabular('LossQ', average_only=True)
+            logger.log_tabular('LossAQ', average_only=True)
+
             logger.dump_tabular()
